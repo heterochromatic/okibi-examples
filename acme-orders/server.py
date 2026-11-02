@@ -33,6 +33,10 @@ class H(BaseHTTPRequestHandler):
         try: return json.loads(self.rfile.read(n) or "{}")
         except Exception: return None
     def route(self, method):
+        try: return self._route(method)
+        except Exception: return err(self, 500, "internal error", "server_error")
+
+    def _route(self, method):
         if self.headers.get("X-API-Key") != os.environ.get("ACME_API_KEY", "demo-key"):
             return err(self, 401, "Missing or invalid X-API-Key header", "unauthorized")
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}; p = u.path.rstrip("/")
@@ -48,7 +52,11 @@ class H(BaseHTTPRequestHandler):
         if method == "POST" and p == "/v1/orders":
             b = self.body()
             if not b or b.get("customer_id") not in CUSTOMERS: return err(self, 422, "customer_id must reference an existing customer")
-            if not b.get("items"): return err(self, 422, "items must contain at least one item")
+            if not isinstance(b.get("items"), list) or not b["items"]: return err(self, 422, "items must contain at least one item")
+            for i in b["items"]:
+                if not isinstance(i, dict) or i.get("product_id") not in PRODUCTS: return err(self, 422, "each item needs a product_id that exists")
+                q = i.get("quantity", 1)
+                if isinstance(q, bool) or not isinstance(q, int) or q < 1: return err(self, 422, "quantity must be an integer of at least 1")
             oid = f"ord_{len(ORDERS) + 1}"
             total = sum(PRODUCTS.get(i.get("product_id"), {"price_cents": 0})["price_cents"] * i.get("quantity", 1) for i in b["items"])
             ORDERS[oid] = {"id": oid, "customer_id": b["customer_id"], "status": "pending", "items": b["items"], "total_cents": total}
